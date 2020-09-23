@@ -1,4 +1,12 @@
 ## pcf
+### Potential changes
+- [ ] Garbage collection (via Boehm GC)
+- [ ] Constant propagation
+- [ ] Bidirectional type checking
+- [ ] Booleans
+- [ ] Pairs
+- [ ] Polymorphism and type inference
+- [ ] I/O
 
 A one file compiler for PCF to C. It's currently about 275 lines of
 compiler and 75 lines of extremely boring instances. The compiler is

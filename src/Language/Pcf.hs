@@ -21,7 +21,8 @@ import           Language.C.DSL
 import           Paths_pcf
 import           Data.Deriving
 
-data Ty = Arr Ty Ty
+infixr 5 :->
+data Ty = Ty :-> Ty
         | Nat
         deriving (Eq, Show)
 
@@ -53,11 +54,11 @@ typeCheck _   Zero = return Nat
 typeCheck env (Suc e) = assertTy env e Nat >> return Nat
 typeCheck env (V a) = MaybeT . return $ M.lookup a env
 typeCheck env (App f a) = typeCheck env f >>= \case
-  Arr fTy tTy -> assertTy env a fTy >> return tTy
+  fTy :-> tTy -> assertTy env a fTy >> return tTy
   _ -> mzero
 typeCheck env (Lam t bind) = do
   v <- gen
-  Arr t <$> typeCheck (M.insert v t env) (instantiate1 (V v) bind)
+  (t :->) <$> typeCheck (M.insert v t env) (instantiate1 (V v) bind)
 typeCheck env (Fix t bind) = do
   v <- gen
   assertTy (M.insert v t env) (instantiate1 (V v) bind) t
@@ -236,7 +237,7 @@ fauxc (LetL binds e) = do
           let bind' = abstract (flip elemIndex vs) body
           tell [FauxCTop guid (length clos + 1) bind']
           bindingConstr guid <$> mapM fauxc clos
-        bindTy (Arr _ _) = Clos
+        bindTy (_ :-> _) = Clos
         bindTy Nat = Int
         liftBinds (NRecL t clos bind) = lifter NRecFC clos bind
         liftBinds (RecL t clos bind) = lifter (RecFC $ bindTy t) clos bind
@@ -338,10 +339,20 @@ output e = case compile e of
     rts <- getDataFileName "src/preamble.c" >>= readFile
     return . Just $ rts ++ '\n' : show (pretty p)
 
-conv :: Exp a -> IO String
-conv e = fromJust <$> (output (fromJust (closed e)))
+conv :: Exp a -> IO ()
+conv e = putStrLn =<< (fromJust <$> (output (fromJust (closed e))))
 
+lam ty a b = Lam ty (abstract1 a b)
 ex1 = App (Lam Nat (abstract1 "x" (V "x"))) (Suc Zero)
+add = Fix (Nat :-> Nat :-> Nat) f
+  where
+    lam ty a b = Lam ty (abstract1 a b)
+    f = (abstract1 "rec"
+         (lam Nat "m"
+          (lam Nat "n"
+            (Ifz (V "m")
+                 (V "n")
+              (abstract1 "x" (Suc (App (App (V "rec") (V "x")) (V "n"))))))))
 
 -------------------------------------------------------------------
 ------------------- Extremely Boring Instances --------------------
