@@ -19,7 +19,7 @@ import           Data.String
 import           Data.Traversable          hiding (mapM)
 import           Language.C.DSL
 import           Paths_pcf
-import Data.Deriving
+import           Data.Deriving
 
 data Ty = Arr Ty Ty
         | Nat
@@ -68,6 +68,33 @@ typeCheck env (Ifz i t e) = do
   v <- gen
   assertTy (M.insert v Nat env) (instantiate1 (V v) e) ty
   return ty
+
+--------------------------------------------------------
+---------------- Constant Folding  ---------------------
+--------------------------------------------------------
+-- Annotated values with static content s, dynamic d
+data Ann s d = S s | D d
+simpl e = eraseAnn' <$> simpl' e
+
+type Ann' a = Ann a a
+eraseAnn' (S s) = s
+eraseAnn' (D d) = d
+
+simpl' Zero = pure (S Zero)
+simpl' (Suc e) = do
+  i <- simpl' e
+  case i of
+    S n -> pure (S (Suc n))
+    D e -> pure (D e)
+simpl' (App (Lam t b) a) = simpl' (instantiate1 a b)
+simpl' (Ifz n a b) = do
+  i <- simpl' n
+  case i of
+    S Zero -> simpl' a
+    S i' -> simpl' (instantiate1 i' b)
+    -- TODO: how to simpl' under binder?
+    D e -> D <$> (Ifz e <$> (eraseAnn' <$> simpl' a) <*> pure b)
+simpl' e = pure (D e)
 
 --------------------------------------------------------
 --------------- Closure Conversion ---------------------
@@ -286,6 +313,7 @@ topc (FauxCTop i numArgs body) = do
 -- given expression.
 compile :: Exp Integer -> Maybe CTranslUnit
 compile e = runGen . runMaybeT $ do
+  e' <- simpl e
   assertTy M.empty e Nat
   funs <- lift $ pipe e
   return . transUnit . map export $ funs
@@ -310,23 +338,16 @@ output e = case compile e of
     rts <- getDataFileName "src/preamble.c" >>= readFile
     return . Just $ rts ++ '\n' : show (pretty p)
 
+conv :: Exp a -> IO String
+conv e = fromJust <$> (output (fromJust (closed e)))
+
+ex1 = App (Lam Nat (abstract1 "x" (V "x"))) (Suc Zero)
 
 -------------------------------------------------------------------
 ------------------- Extremely Boring Instances --------------------
 -------------------------------------------------------------------
 
-instance Applicative Exp where
-  pure = return
-  (<*>) = ap
-instance Monad Exp where
-  return = V
-  V a >>= f = f a
-  App l r >>= f = App (l >>= f) (r >>= f)
-  Lam t body >>= f = Lam t (body >>>= f)
-  Fix t body >>= f = Fix t (body >>>= f)
-  Ifz i t e >>= f = Ifz (i >>= f) (t >>= f) (e >>>= f)
-  Suc e >>= f = Suc (e >>= f)
-  Zero >>= _ = Zero
+makeBound ''Exp
 
 instance Applicative ExpC where
   pure = return
